@@ -29,7 +29,7 @@ assert_kernel_release "${out_root}/custom/common/include/config/kernel.release"
 
 release_dir="${RELEASE_DIR:-${PROJECT_ROOT}/releases}"
 archive="${release_dir}/${target}-anykernel3.zip"
-checksum="${archive}.sha256"
+checksum="${release_dir}/${target}-SHA256SUMS.txt"
 staging="$(mktemp -d "${TMPDIR:-/tmp}/6sp-anykernel.XXXXXX")"
 cleanup() {
   rm -rf -- "$staging"
