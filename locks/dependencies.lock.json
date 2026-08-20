@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "dependencies": {
+    "kernelsu": {
+      "repository": "https://github.com/tiann/KernelSU.git",
+      "commit": "b0bc817b4e966aa6aa830834eaf6ef765d821d40"
+    },
+    "anykernel3": {
+      "repository": "https://github.com/osm0sis/AnyKernel3.git",
+      "commit": "e4b1bb25ca2aabcfd57f694a5998d87130701b71"
+    }
+  }
+}

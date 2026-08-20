@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+  <remote name="aosp" fetch="https://android.googlesource.com/" review="https://android-review.googlesource.com/" />
+  <default remote="aosp" sync-j="4" />
+
+  <!-- Revisions are resolved from kernel/superproject ea7e8079c19692905826c57330babc05142b2eba. -->
+  <project path="build/kernel" name="kernel/build" revision="b05fb2e75ba86f934da7fbcb4435678a54645c5f">
+    <linkfile src="kleaf/bazel.sh" dest="tools/bazel" />
+    <linkfile src="kleaf/bazel.WORKSPACE" dest="WORKSPACE" />
+    <linkfile src="build.sh" dest="build/build.sh" />
+    <linkfile src="build_abi.sh" dest="build/build_abi.sh" />
+    <linkfile src="build_test.sh" dest="build/build_test.sh" />
+    <linkfile src="build_utils.sh" dest="build/build_utils.sh" />
+    <linkfile src="config.sh" dest="build/config.sh" />
+    <linkfile src="envsetup.sh" dest="build/envsetup.sh" />
+    <linkfile src="_setup_env.sh" dest="build/_setup_env.sh" />
+    <linkfile src="multi-switcher.sh" dest="build/multi-switcher.sh" />
+    <linkfile src="abi" dest="build/abi" />
+    <linkfile src="static_analysis" dest="build/static_analysis" />
+  </project>
+  <project path="common" name="kernel/common" revision="6f2f96be86b93de6ed58a2c46b456fb49734c382">
+    <linkfile src="." dest=".source_date_epoch_dir" />
+  </project>
+  <project path="kernel/tests" name="kernel/tests" revision="945946db4f6f56e036288fa33026d4a921fb891c" />
+  <project path="kernel/configs" name="kernel/configs" revision="b3cc2bc03dab303c54a9ce1f709f8ee315eb311d" />
+  <project path="common-modules/virtual-device" name="kernel/common-modules/virtual-device" revision="cb03117b76f832cf7aef613ee38b6b945456b641" />
+
+  <project path="prebuilts/clang/host/linux-x86" name="platform/prebuilts/clang/host/linux-x86" revision="9f759dee5cdc5f85d076c642a192f6a9232f7058" clone-depth="1" />
+  <project path="prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.17-4.8" name="platform/prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.17-4.8" revision="007101a451907c5369db5002ddf7b14dcefb7864" clone-depth="1" />
+  <project path="prebuilts/build-tools" name="platform/prebuilts/build-tools" revision="f6813860e16b2fa1461a15e7b8a3127dfdee021a" clone-depth="1" />
+  <project path="prebuilts/kernel-build-tools" name="kernel/prebuilts/build-tools" revision="083e34d8c2c4239be4967172427268c267585951" clone-depth="1" />
+  <project path="prebuilts/tradefed" name="platform/tools/tradefederation/prebuilts" revision="380f78f5d9b9ffb60974cbc75e2aa236266b5922" clone-depth="1" />
+  <project path="prebuilts/asuite" name="platform/prebuilts/asuite" revision="d90d0060aedfd80f2119c1db5339a093f2758926" clone-depth="1" />
+  <project path="tools/mkbootimg" name="platform/system/tools/mkbootimg" revision="2208a03d874255af1e4eaf6cf7c156fe1dc98943" />
+  <project path="prebuilts/bazel/linux-x86_64" name="platform/prebuilts/bazel/linux-x86_64" revision="6162318e6458db65f94eed6671e302c3e894b1ac" clone-depth="1" />
+  <project path="prebuilts/jdk/jdk11" name="platform/prebuilts/jdk/jdk11" revision="2a2fb389233fcc4027625f7642087a09d6014fdf" clone-depth="1" />
+  <project path="prebuilts/ndk-r23" name="toolchain/prebuilts/ndk/r23" revision="93532f3052c14fbb337ff57d5732128dc7481ee6" clone-depth="1" />
+
+  <project path="external/bazel-skylib" name="platform/external/bazel-skylib" revision="f1fb8167b4ed64feb494fd1ea6a8a619bbb549de" />
+  <project path="build/bazel_common_rules" name="platform/build/bazel_common_rules" revision="7a007ed2ff0d97eebf77977420f185c66698f7a3" />
+  <project path="external/stardoc" name="platform/external/stardoc" revision="b6ef2c6b6e39087f7396aaeb13c83464dfce4a19" />
+  <project path="external/python/absl-py" name="platform/external/python/absl-py" revision="63f98de5b158481877489ca39158ed691f7551e1" />
+</manifest>
+

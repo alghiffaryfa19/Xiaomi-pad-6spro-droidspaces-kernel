@@ -1,0 +1,36 @@
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Linux build workspaces and outputs
+work/
+out/
+out-*/
+build-output/
+releases/
+*.img
+*.zip
+*.tar
+*.tar.*
+
+# Device backups must never be published
+backups/
+
+# Exact third-party checkouts are reconstructed from locks
+third_party/KernelSU/
+third_party/AnyKernel3/
+
+# Generated metadata and logs
+*.log
+*.tmp
+__pycache__/
+*.py[cod]
