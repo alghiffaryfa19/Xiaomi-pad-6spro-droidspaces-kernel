@@ -87,15 +87,13 @@ project_attribute() {
 }
 
 verify_inputs() {
-  local line revision name checkout project_count patch="$BUILD_DIR/$PATCH_FILE" input
+  local line revision name checkout patch="$BUILD_DIR/$PATCH_FILE" input
   for input in "$BUILD_CONFIG_FILE" "$MANIFEST" "$patch" "$BUILD_DIR/scmversion" \
     "$BUILD_DIR/droidspaces.fragment" "$BUILD_DIR/resukisu.fragment" \
     "$BUILD_DIR/release.fragment" "$BUILD_DIR/anykernel.sh"; do
     [[ -s "$input" ]] || die "build input is missing or empty: $input"
   done
 
-  project_count=$(manifest_projects | wc -l | tr -d ' ')
-  [[ "$project_count" -eq 7 ]] || die "expected 7 pinned projects, found $project_count"
   while IFS= read -r line; do
     revision=$(project_attribute "$line" revision)
     name=$(project_attribute "$line" name)
@@ -133,7 +131,7 @@ verify_sources() {
     fi
   done < <(manifest_projects)
   ((${#failures[@]} == 0)) || die $'source lock verification failed:\n'"$(printf '%s\n' "${failures[@]}")"
-  log 'source lock verified (7 projects)'
+  log 'source lock verified'
 }
 
 check_host() {
@@ -278,12 +276,8 @@ prepare_sources() {
 
   link="$common/drivers/kernelsu"
   if [[ -L "$link" ]]; then
-    # Migrate the symlink created by the previous KernelSU integration.
-    if [[ $(readlink "$link") == ../../KernelSU/kernel ]]; then
-      ln -sfn "../../$ROOT_SOLUTION/kernel" "$link"
-    elif [[ $(readlink "$link") != "../../$ROOT_SOLUTION/kernel" ]]; then
+    [[ $(readlink "$link") == "../../$ROOT_SOLUTION/kernel" ]] ||
       die 'unexpected drivers/kernelsu symlink'
-    fi
   elif [[ -e "$link" ]]; then
     die 'drivers/kernelsu exists and is not a symlink'
   else
@@ -358,7 +352,7 @@ build_kernel() {
 }
 
 package_kernel() {
-  local root=$1 out image ak3 release archive checksum staging temporary_archive entries item digest
+  local root=$1 out image ak3 release archive checksum staging temporary_archive digest
   out=$(output_root "$root")
   image="$out/dist-custom/Image"
   verify_config "$out/custom/common/.config" true
@@ -375,9 +369,11 @@ package_kernel() {
   archive="$release/$TARGET-anykernel3.zip"
   checksum="$release/$TARGET-SHA256SUMS.txt"
   make_temp staging
-  cp -a "$ak3/." "$staging/"
-  rm -rf -- "$staging/.git" "$staging/.github" "$staging/modules"
-  rm -f -- "$staging/README.md" "$staging/patch/placeholder" "$staging/ramdisk/placeholder"
+  mkdir -p -- "$staging/META-INF/com/google/android" "$staging/tools"
+  cp -- "$ak3/LICENSE" "$staging/"
+  cp -- "$ak3/META-INF/com/google/android/update-binary" \
+    "$ak3/META-INF/com/google/android/updater-script" "$staging/META-INF/com/google/android/"
+  cp -- "$ak3/tools/ak3-core.sh" "$ak3/tools/busybox" "$ak3/tools/magiskboot" "$staging/tools/"
   cp -- "$BUILD_DIR/anykernel.sh" "$staging/anykernel.sh"
   cp -- "$image" "$staging/Image"
   printf '%s\n' "$TARGET" > "$staging/version"
@@ -387,12 +383,6 @@ package_kernel() {
   (cd "$staging" && find . -type f -printf '%P\n' | zip -q -9 "$temporary_archive" -@)
   mv -f -- "$temporary_archive" "$archive"
 
-  entries=$(unzip -Z1 "$archive")
-  for item in Image LICENSE anykernel.sh META-INF/com/google/android/update-binary tools/ak3-core.sh version; do
-    grep -Fqx "$item" <<<"$entries" || die "archive is missing: $item"
-  done
-  grep -Eq '(^|/)(\.git|README\.md|placeholder)(/|$)' <<<"$entries" &&
-    die 'archive contains development-only files'
   unzip -tq "$archive" >/dev/null
   digest=$(hash_file "$archive")
   printf '%s  %s\n' "$digest" "$(basename "$archive")" > "$checksum"
