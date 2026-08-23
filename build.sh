@@ -37,11 +37,11 @@ load_config() {
   # shellcheck source=build/config.env
   source "$BUILD_CONFIG_FILE"
   [[ -n "$TARGET" && -n "$MANIFEST_COMMIT" && -n "$COMMON_COMMIT" && -n "$SCMVERSION" &&
-     -n "$KERNEL_RELEASE" && -n "$AOSP_BUILD_CONFIG" && -n "$LTO_MODE" && -n "$ROOT_SOLUTION" &&
-     -n "$ROOT_SOLUTION_REPOSITORY" && -n "$ROOT_SOLUTION_COMMIT" && -n "$AK3_REPOSITORY" &&
+     -n "$KERNEL_RELEASE" && -n "$AOSP_BUILD_CONFIG" && -n "$LTO_MODE" &&
+     -n "$KERNELSU_REPOSITORY" && -n "$KERNELSU_COMMIT" && -n "$AK3_REPOSITORY" &&
      -n "$AK3_COMMIT" && -n "$PATCH_FILE" &&
      -n "$PATCH_SHA256" ]] || die 'required lock value is missing'
-  for commit in "$MANIFEST_COMMIT" "$COMMON_COMMIT" "$ROOT_SOLUTION_COMMIT" "$AK3_COMMIT"; do
+  for commit in "$MANIFEST_COMMIT" "$COMMON_COMMIT" "$KERNELSU_COMMIT" "$AK3_COMMIT"; do
     [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || die "invalid pinned commit: $commit"
   done
   [[ "$PATCH_SHA256" =~ ^[0-9a-f]{64}$ ]] || die 'invalid patch digest'
@@ -89,7 +89,7 @@ project_attribute() {
 verify_inputs() {
   local line revision name checkout patch="$BUILD_DIR/$PATCH_FILE" input
   for input in "$BUILD_CONFIG_FILE" "$MANIFEST" "$patch" "$BUILD_DIR/scmversion" \
-    "$BUILD_DIR/droidspaces.fragment" "$BUILD_DIR/resukisu.fragment" \
+    "$BUILD_DIR/droidspaces.fragment" "$BUILD_DIR/kernelsu.fragment" \
     "$BUILD_DIR/release.fragment" "$BUILD_DIR/anykernel.sh"; do
     [[ -s "$input" ]] || die "build input is missing or empty: $input"
   done
@@ -103,12 +103,12 @@ verify_inputs() {
   [[ "$(hash_file "$patch")" == "$PATCH_SHA256" ]] ||
     die "patch digest mismatch: $patch"
 
-  for name in "$ROOT_SOLUTION" AnyKernel3; do
+  for name in KernelSU AnyKernel3; do
     checkout="$CACHE_DIR/$name"
     [[ -e "$checkout" ]] || continue
     [[ -d "$checkout/.git" ]] || die "$name checkout is not a git repository"
-    if [[ "$name" == "$ROOT_SOLUTION" ]]; then
-      [[ "$(git_head "$checkout")" == "$ROOT_SOLUTION_COMMIT" ]] || die "$ROOT_SOLUTION checkout does not match its lock"
+    if [[ "$name" == KernelSU ]]; then
+      [[ "$(git_head "$checkout")" == "$KERNELSU_COMMIT" ]] || die 'KernelSU checkout does not match its lock'
     else
       [[ "$(git_head "$checkout")" == "$AK3_COMMIT" ]] || die 'AnyKernel3 checkout does not match its lock'
     fi
@@ -191,7 +191,7 @@ fetch_dependency() {
 }
 
 fetch_dependencies() {
-  fetch_dependency "$ROOT_SOLUTION" "$ROOT_SOLUTION_REPOSITORY" "$ROOT_SOLUTION_COMMIT"
+  fetch_dependency KernelSU "$KERNELSU_REPOSITORY" "$KERNELSU_COMMIT"
   fetch_dependency AnyKernel3 "$AK3_REPOSITORY" "$AK3_COMMIT"
 }
 
@@ -221,11 +221,10 @@ verify_config() {
   [[ -f "$config" ]] || die "kernel config not found: $config"
   for symbol in SYSVIPC POSIX_MQUEUE IPC_NS PID_NS DEVTMPFS NETFILTER_XT_MATCH_ADDRTYPE \
     USER_NS IP_NF_TARGET_REJECT NETFILTER_XT_TARGET_LOG NETFILTER_XT_MATCH_RECENT \
-    IP_SET IP_SET_HASH_IP IP_SET_HASH_NET NETFILTER_XT_SET TMPFS_POSIX_ACL TMPFS_XATTR KSU \
-    KSU_MULTI_MANAGER_SUPPORT KSU_TRACEPOINT_HOOK; do
+    IP_SET IP_SET_HASH_IP IP_SET_HASH_NET NETFILTER_XT_SET TMPFS_POSIX_ACL TMPFS_XATTR KSU; do
     require_config_line "$config" "CONFIG_$symbol=y"
   done
-  for symbol in KSU_DEBUG KSU_TOOLKIT_SUPPORT KSU_DISABLE_MANAGER KSU_DISABLE_POLICY; do
+  for symbol in KSU_DEBUG KSU_DISABLE_MANAGER KSU_DISABLE_POLICY; do
     require_config_line "$config" "# CONFIG_$symbol is not set"
   done
   grep -Eq '^CONFIG_(KSU_SUSFS|SUSFS|NT_SYNC|NTSYNC)=y$' "$config" &&
@@ -246,7 +245,7 @@ verify_config() {
 }
 
 prepare_sources() {
-  local root=$1 common="$1/common" patch="$BUILD_DIR/$PATCH_FILE" root_source root_solution link
+  local root=$1 common="$1/common" patch="$BUILD_DIR/$PATCH_FILE" kernelsu_source kernelsu link
   local makefile kconfig marker tool defconfig constants clang_version clang_bin config_tmp
   require_workspace "$root"
   [[ "$(git_head "$common")" == "$COMMON_COMMIT" ]] || die 'common checkout does not match the build lock'
@@ -261,27 +260,27 @@ prepare_sources() {
     git -C "$common" apply "$patch"
   fi
 
-  root_source="$CACHE_DIR/$ROOT_SOLUTION"
-  root_solution="$root/$ROOT_SOLUTION"
-  [[ -d "$root_source/.git" && "$(git_head "$root_source")" == "$ROOT_SOLUTION_COMMIT" ]] ||
-    die "locked $ROOT_SOLUTION dependency is unavailable"
-  require_clean "$root_source"
-  if [[ ! -e "$root_solution" ]]; then
-    git clone --no-hardlinks "$root_source" "$root_solution"
-    git -C "$root_solution" checkout --detach "$ROOT_SOLUTION_COMMIT"
+  kernelsu_source="$CACHE_DIR/KernelSU"
+  kernelsu="$root/KernelSU"
+  [[ -d "$kernelsu_source/.git" && "$(git_head "$kernelsu_source")" == "$KERNELSU_COMMIT" ]] ||
+    die 'locked KernelSU dependency is unavailable'
+  require_clean "$kernelsu_source"
+  if [[ ! -e "$kernelsu" ]]; then
+    git clone --no-hardlinks "$kernelsu_source" "$kernelsu"
+    git -C "$kernelsu" checkout --detach "$KERNELSU_COMMIT"
   fi
-  [[ -d "$root_solution/.git" && "$(git_head "$root_solution")" == "$ROOT_SOLUTION_COMMIT" ]] ||
-    die "workspace $ROOT_SOLUTION checkout mismatch"
-  require_clean "$root_solution"
+  [[ -d "$kernelsu/.git" && "$(git_head "$kernelsu")" == "$KERNELSU_COMMIT" ]] ||
+    die 'workspace KernelSU checkout mismatch'
+  require_clean "$kernelsu"
 
   link="$common/drivers/kernelsu"
   if [[ -L "$link" ]]; then
-    [[ $(readlink "$link") == "../../$ROOT_SOLUTION/kernel" ]] ||
+    [[ $(readlink "$link") == ../../KernelSU/kernel ]] ||
       die 'unexpected drivers/kernelsu symlink'
   elif [[ -e "$link" ]]; then
     die 'drivers/kernelsu exists and is not a symlink'
   else
-    ln -s "../../$ROOT_SOLUTION/kernel" "$link"
+    ln -s ../../KernelSU/kernel "$link"
   fi
 
   makefile="$common/drivers/Makefile"
@@ -298,7 +297,7 @@ prepare_sources() {
   defconfig="$common/arch/arm64/configs/gki_defconfig"
   [[ -x "$tool" && -f "$defconfig" ]] || die 'kernel config tools are unavailable'
   apply_config_fragment "$tool" "$defconfig" "$BUILD_DIR/droidspaces.fragment"
-  apply_config_fragment "$tool" "$defconfig" "$BUILD_DIR/resukisu.fragment"
+  apply_config_fragment "$tool" "$defconfig" "$BUILD_DIR/kernelsu.fragment"
 
   constants="$common/build.config.constants"
   clang_version=$(sed -n 's/^CLANG_VERSION=//p' "$constants" | head -n 1)
@@ -327,8 +326,8 @@ verify_release() {
 build_kernel() {
   local root=$1 out build_out dist artifact
   verify_sources "$root"
-  [[ -d "$root/$ROOT_SOLUTION/.git" && "$(git_head "$root/$ROOT_SOLUTION")" == "$ROOT_SOLUTION_COMMIT" ]] ||
-    die "$ROOT_SOLUTION has not been prepared"
+  [[ -d "$root/KernelSU/.git" && "$(git_head "$root/KernelSU")" == "$KERNELSU_COMMIT" ]] ||
+    die 'KernelSU has not been prepared'
   git -C "$root/common" apply --reverse --check "$BUILD_DIR/$PATCH_FILE" >/dev/null 2>&1 ||
     die 'Droidspaces patch has not been applied'
 
@@ -398,8 +397,8 @@ commands:
   check      validate the Linux build host
   verify     validate pinned build inputs and local dependencies
   sync       shallow-sync the pinned AOSP source
-  deps       fetch pinned ReSukiSU and AnyKernel3 checkouts
-  prepare    apply the patch, ReSukiSU and recommended config
+  deps       fetch pinned KernelSU and AnyKernel3 checkouts
+  prepare    apply the patch, KernelSU and recommended config
   build      build and verify the custom kernel
   package    create and verify the AnyKernel3 archive
   release    check, verify, deps, prepare, build and package
