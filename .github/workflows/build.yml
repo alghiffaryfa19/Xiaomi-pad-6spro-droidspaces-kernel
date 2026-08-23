@@ -1,0 +1,35 @@
+name: Build kernel
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            bc bison build-essential file flex git openssl perl repo rsync unzip zip
+          sudo apt-get clean
+
+      - name: Sync pinned AOSP source
+        run: ./build.sh sync "$RUNNER_TEMP/aosp"
+
+      - name: Build release
+        run: ./build.sh release "$RUNNER_TEMP/aosp"
+
+      - name: Upload release
+        uses: actions/upload-artifact@v4
+        with:
+          name: 6sp-droidspaces-kernel
+          path: releases/*
+          if-no-files-found: error

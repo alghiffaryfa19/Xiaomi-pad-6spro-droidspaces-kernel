@@ -4,33 +4,22 @@
 *.swp
 *~
 
-# Local configuration and credentials
+# Local caches, artifacts and device backups.
+.cache/
+releases/
+backups/
+out/
+out-*/
+*.zip
+*.img
+*.tar
+*.tar.*
+*.log
+*.tmp
+
+# Never commit credentials.
 .env
 .env.*
 !.env.example
 *.key
 *.pem
-
-# Linux build workspaces and outputs
-work/
-out/
-out-*/
-build-output/
-releases/
-*.img
-*.zip
-*.tar
-*.tar.*
-
-# Device backups must never be published
-backups/
-
-# Exact third-party checkouts are reconstructed from locks
-third_party/KernelSU/
-third_party/AnyKernel3/
-
-# Generated metadata and logs
-*.log
-*.tmp
-__pycache__/
-*.py[cod]
