@@ -103,20 +103,31 @@ sync_sources() {
 }
 
 fetch_dependency() {
-  local name=$1 repository=$2 commit=$3 checkout="$CACHE_DIR/$1" temporary
+  local name=$1 repository=$2 commit=$3 full_history=$4
+  local checkout="$CACHE_DIR/$1" temporary
 
   if [[ -e "$checkout" ]]; then
     require_commit "$checkout" "$commit"
     require_clean "$checkout"
+    if [[ "$full_history" == true ]]; then
+      if [[ $(git -C "$checkout" rev-parse --is-shallow-repository) == true ]]; then
+        git -C "$checkout" fetch --unshallow --filter=blob:none --tags origin
+      fi
+    fi
     return
   fi
 
   mkdir -p -- "$CACHE_DIR"
   temporary="$TEMP_DIR/$name"
-  git init -q "$temporary"
-  git -C "$temporary" remote add origin "$repository"
-  git -C "$temporary" fetch --depth=1 --no-tags origin "$commit"
-  git -C "$temporary" checkout --detach FETCH_HEAD
+  if [[ "$full_history" == true ]]; then
+    git clone --filter=blob:none --no-checkout "$repository" "$temporary"
+    git -C "$temporary" checkout --detach "$commit"
+  else
+    git init -q "$temporary"
+    git -C "$temporary" remote add origin "$repository"
+    git -C "$temporary" fetch --depth=1 --no-tags origin "$commit"
+    git -C "$temporary" checkout --detach FETCH_HEAD
+  fi
   require_commit "$temporary" "$commit"
   mv -- "$temporary" "$checkout"
 }
@@ -124,9 +135,6 @@ fetch_dependency() {
 integrate_kernelsu() {
   local common="$1/common" source="$CACHE_DIR/KernelSU"
   local checkout="$1/KernelSU" link="$1/common/drivers/kernelsu" marker
-
-  require_commit "$source" "$KERNELSU_COMMIT"
-  require_clean "$source"
 
   if [[ ! -e "$checkout" ]]; then
     git clone --no-hardlinks "$source" "$checkout"
@@ -229,11 +237,14 @@ build_kernel() {
 
 package_kernel() {
   local workspace=$1 image="$1/out-6sp/dist-custom/Image"
-  local anykernel="$CACHE_DIR/AnyKernel3" staging archive checksum temporary digest
+  local anykernel="$CACHE_DIR/AnyKernel3" kernelsu="$CACHE_DIR/KernelSU"
+  local staging archive checksum temporary digest kernelsu_tag lto_label
 
-  require_commit "$anykernel" "$AK3_COMMIT"
-  require_clean "$anykernel"
   [[ -f "$image" ]] || die "kernel Image is missing"
+
+  kernelsu_tag=$(git -C "$kernelsu" describe --tags --exact-match "$KERNELSU_COMMIT")
+  [[ "$kernelsu_tag" == v[0-9]* ]] || die "KernelSU commit has no release tag"
+  lto_label=${LTO_MODE^}
 
   staging="$TEMP_DIR/package"
   mkdir -p -- "$staging/META-INF/com/google/android" "$staging/tools" "$RELEASE_DIR"
@@ -243,7 +254,8 @@ package_kernel() {
     "$staging/META-INF/com/google/android/"
   cp -- "$anykernel/tools/ak3-core.sh" "$anykernel/tools/busybox" \
     "$anykernel/tools/magiskboot" "$staging/tools/"
-  cp -- "$BUILD_DIR/anykernel.sh" "$staging/anykernel.sh"
+  sed -e "s/@KERNELSU_TAG@/$kernelsu_tag/" -e "s/@LTO_LABEL@/$lto_label/" \
+    "$BUILD_DIR/anykernel.sh" > "$staging/anykernel.sh"
   cp -- "$image" "$staging/Image"
   printf '%s\n' "$TARGET" > "$staging/version"
 
@@ -269,11 +281,11 @@ main() {
   log "syncing pinned AOSP source"
   sync_sources "$workspace"
   log "fetching pinned dependencies"
-  fetch_dependency KernelSU "$KERNELSU_REPOSITORY" "$KERNELSU_COMMIT"
-  fetch_dependency AnyKernel3 "$AK3_REPOSITORY" "$AK3_COMMIT"
+  fetch_dependency KernelSU "$KERNELSU_REPOSITORY" "$KERNELSU_COMMIT" true
+  fetch_dependency AnyKernel3 "$AK3_REPOSITORY" "$AK3_COMMIT" false
   log "applying Droidspaces and KernelSU configuration"
   prepare_sources "$workspace"
-  log "building $TARGET with Thin LTO"
+  log "building $TARGET with ${LTO_MODE^} LTO"
   build_kernel "$workspace"
   log "packaging AnyKernel3 artifact"
   package_kernel "$workspace"
