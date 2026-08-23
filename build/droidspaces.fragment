@@ -1,14 +1,15 @@
-# Exact options listed by Droidspaces' GKI section at commit 3736fd4.
+# Required and recommended GKI settings from the Droidspaces Chinese guide at
+# b9def52e86f70c4c2f63778d71502f0e5fa70885.
 CONFIG_SYSVIPC=y
 CONFIG_POSIX_MQUEUE=y
 CONFIG_IPC_NS=y
 CONFIG_PID_NS=y
 CONFIG_DEVTMPFS=y
 CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y
+
+# Recommended support for nested containers, UFW/Fail2ban and NixOS.
 CONFIG_USER_NS=y
-# Linux 5.15 implements the IPv4 REJECT target under this symbol; the
-# Droidspaces documentation's NETFILTER_XT_TARGET_REJECT name is not present
-# in the locked android13-5.15 source tree.
+# Linux 5.15 uses this IPv4 symbol; NETFILTER_XT_TARGET_REJECT is absent.
 CONFIG_IP_NF_TARGET_REJECT=y
 CONFIG_NETFILTER_XT_TARGET_LOG=y
 CONFIG_NETFILTER_XT_MATCH_RECENT=y

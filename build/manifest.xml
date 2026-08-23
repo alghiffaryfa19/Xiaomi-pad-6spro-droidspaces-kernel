@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+  <remote name="aosp" fetch="https://android.googlesource.com/" review="https://android-review.googlesource.com/" />
+  <default remote="aosp" sync-j="4" />
+
+  <!-- Revisions are resolved from kernel/superproject ea7e8079c19692905826c57330babc05142b2eba. -->
+  <project path="build/kernel" name="kernel/build" revision="b05fb2e75ba86f934da7fbcb4435678a54645c5f" clone-depth="1">
+    <linkfile src="kleaf/bazel.sh" dest="tools/bazel" />
+    <linkfile src="kleaf/bazel.WORKSPACE" dest="WORKSPACE" />
+    <linkfile src="build.sh" dest="build/build.sh" />
+    <linkfile src="build_abi.sh" dest="build/build_abi.sh" />
+    <linkfile src="build_test.sh" dest="build/build_test.sh" />
+    <linkfile src="build_utils.sh" dest="build/build_utils.sh" />
+    <linkfile src="config.sh" dest="build/config.sh" />
+    <linkfile src="envsetup.sh" dest="build/envsetup.sh" />
+    <linkfile src="_setup_env.sh" dest="build/_setup_env.sh" />
+    <linkfile src="multi-switcher.sh" dest="build/multi-switcher.sh" />
+    <linkfile src="abi" dest="build/abi" />
+    <linkfile src="static_analysis" dest="build/static_analysis" />
+  </project>
+  <project path="common" name="kernel/common" revision="6f2f96be86b93de6ed58a2c46b456fb49734c382" clone-depth="1">
+    <linkfile src="." dest=".source_date_epoch_dir" />
+  </project>
+
+  <project path="prebuilts/clang/host/linux-x86" name="platform/prebuilts/clang/host/linux-x86" revision="9f759dee5cdc5f85d076c642a192f6a9232f7058" clone-depth="1" />
+  <project path="prebuilts/build-tools" name="platform/prebuilts/build-tools" revision="f6813860e16b2fa1461a15e7b8a3127dfdee021a" clone-depth="1" />
+  <project path="prebuilts/kernel-build-tools" name="kernel/prebuilts/build-tools" revision="083e34d8c2c4239be4967172427268c267585951" clone-depth="1" />
+  <project path="prebuilts/ndk-r23" name="toolchain/prebuilts/ndk/r23" revision="93532f3052c14fbb337ff57d5732128dc7481ee6" clone-depth="1" />
+
+</manifest>

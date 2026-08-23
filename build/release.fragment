@@ -1,0 +1,13 @@
+# Keep strict GKI/KMI validation, but distribute only the AnyKernel Image.
+MAKE_GOALS=Image
+
+FILES="
+arch/arm64/boot/Image
+"
+
+SKIP_CP_KERNEL_HDR=1
+IN_KERNEL_MODULES=
+BUILD_SYSTEM_DLKM=
+BUILD_GKI_CERTIFICATION_TOOLS=
+BUILD_GKI_ARTIFACTS=
+ABI_DEFINITION=
