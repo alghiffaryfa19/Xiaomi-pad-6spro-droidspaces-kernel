@@ -95,7 +95,7 @@ verify_inputs() {
   done
 
   project_count=$(manifest_projects | wc -l | tr -d ' ')
-  [[ "$project_count" -eq 6 ]] || die "expected 6 pinned projects, found $project_count"
+  [[ "$project_count" -eq 7 ]] || die "expected 7 pinned projects, found $project_count"
   while IFS= read -r line; do
     revision=$(project_attribute "$line" revision)
     name=$(project_attribute "$line" name)
@@ -133,7 +133,7 @@ verify_sources() {
     fi
   done < <(manifest_projects)
   ((${#failures[@]} == 0)) || die $'source lock verification failed:\n'"$(printf '%s\n' "${failures[@]}")"
-  log 'source lock verified (6 projects)'
+  log 'source lock verified (7 projects)'
 }
 
 check_host() {
