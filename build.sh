@@ -324,8 +324,9 @@ main() {
   package_kernel "$workspace"
   if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
     printf '%s\n' \
-      '## Build inputs' \
+      '## Build summary' \
       '' \
+      "- Kernel \`$KERNEL_RELEASE\`" \
       "- ReSukiSU \`$RESUKISU_RELEASE_TAG\` (\`${RESUKISU_COMMIT:0:12}\`) · [Manager]($RESUKISU_RELEASE_URL)" \
       "- SuSFS \`$SUSFS_VERSION\` (\`${SUSFS_COMMIT:0:12}\`)" \
       >> "$GITHUB_STEP_SUMMARY"
