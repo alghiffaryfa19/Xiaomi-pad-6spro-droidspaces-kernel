@@ -1,0 +1,87 @@
+name: Publish release
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful Build kernel run ID
+        required: true
+        type: string
+      tag:
+        description: New release tag
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_ID: ${{ inputs.run_id }}
+      RELEASE_TAG: ${{ inputs.tag }}
+
+    steps:
+      - name: Validate build and tag
+        id: build
+        run: |
+          [[ "$RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          git check-ref-format "refs/tags/$RELEASE_TAG"
+
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID")
+          jq -e --arg repository "$GITHUB_REPOSITORY" '
+            .name == "Build kernel"
+            and .path == ".github/workflows/build.yml"
+            and .event == "workflow_dispatch"
+            and .status == "completed"
+            and .conclusion == "success"
+            and .head_branch == "main"
+            and .head_repository.full_name == $repository
+          ' <<< "$run" >/dev/null
+
+          tag_ref=$(git ls-remote --refs \
+            "https://github.com/$GITHUB_REPOSITORY.git" "refs/tags/$RELEASE_TAG")
+          [[ -z "$tag_ref" ]] || {
+            echo "Tag already exists: $RELEASE_TAG" >&2
+            exit 1
+          }
+
+          echo "head_sha=$(jq -er '.head_sha' <<< "$run")" >> "$GITHUB_OUTPUT"
+          echo "run_url=$(jq -er '.html_url' <<< "$run")" >> "$GITHUB_OUTPUT"
+
+      - name: Download build artifact
+        run: |
+          gh run download "$RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name 6sp-droidspaces-kernel \
+            --dir release
+
+      - name: Verify build artifact
+        run: |
+          shopt -s nullglob
+          archives=(release/*-anykernel3.zip)
+          checksums=(release/*-SHA256SUMS.txt)
+          ((${#archives[@]} == 1 && ${#checksums[@]} == 1))
+
+          (cd release && sha256sum -c "$(basename "${checksums[0]}")")
+          unzip -tq "${archives[0]}"
+
+      - name: Create GitHub release
+        env:
+          HEAD_SHA: ${{ steps.build.outputs.head_sha }}
+          RUN_URL: ${{ steps.build.outputs.run_url }}
+        run: |
+          shopt -s nullglob
+          archives=(release/*-anykernel3.zip)
+          checksums=(release/*-SHA256SUMS.txt)
+
+          gh release create "$RELEASE_TAG" \
+            "${archives[0]}" "${checksums[0]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$HEAD_SHA" \
+            --title "$RELEASE_TAG" \
+            --notes "Built and tested from [GitHub Actions run $RUN_ID]($RUN_URL)."
