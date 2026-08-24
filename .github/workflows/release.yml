@@ -1,87 +1,38 @@
 name: Publish release
 
 on:
-  workflow_dispatch:
-    inputs:
-      run_id:
-        description: Successful Build kernel run ID
-        required: true
-        type: string
-      tag:
-        description: New release tag
-        required: true
-        type: string
+  push:
+    tags:
+      - "6sp-ds-resukisu-susfs-OS3.0.304.0-r*"
 
 permissions:
-  actions: read
   contents: write
 
 jobs:
   release:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    env:
-      GH_TOKEN: ${{ github.token }}
-      RUN_ID: ${{ inputs.run_id }}
-      RELEASE_TAG: ${{ inputs.tag }}
+    timeout-minutes: 360
 
     steps:
-      - name: Validate build and tag
-        id: build
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install build prerequisites
         run: |
-          [[ "$RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          git check-ref-format "refs/tags/$RELEASE_TAG"
+          sudo apt-get update
+          sudo apt-get install --yes \
+            bc bison build-essential curl file flex git jq openssl patch perl repo rsync unzip zip
 
-          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID")
-          jq -e --arg repository "$GITHUB_REPOSITORY" '
-            .name == "Build kernel"
-            and .path == ".github/workflows/build.yml"
-            and .event == "workflow_dispatch"
-            and .status == "completed"
-            and .conclusion == "success"
-            and .head_branch == "main"
-            and .head_repository.full_name == $repository
-          ' <<< "$run" >/dev/null
-
-          tag_ref=$(git ls-remote --refs \
-            "https://github.com/$GITHUB_REPOSITORY.git" "refs/tags/$RELEASE_TAG")
-          [[ -z "$tag_ref" ]] || {
-            echo "Tag already exists: $RELEASE_TAG" >&2
-            exit 1
-          }
-
-          echo "head_sha=$(jq -er '.head_sha' <<< "$run")" >> "$GITHUB_OUTPUT"
-          echo "run_url=$(jq -er '.html_url' <<< "$run")" >> "$GITHUB_OUTPUT"
-
-      - name: Download build artifact
-        run: |
-          gh run download "$RUN_ID" \
-            --repo "$GITHUB_REPOSITORY" \
-            --name 6sp-droidspaces-kernel \
-            --dir release
-
-      - name: Verify build artifact
-        run: |
-          shopt -s nullglob
-          archives=(release/*-anykernel3.zip)
-          checksums=(release/*-SHA256SUMS.txt)
-          ((${#archives[@]} == 1 && ${#checksums[@]} == 1))
-
-          (cd release && sha256sum -c "$(basename "${checksums[0]}")")
-          unzip -tq "${archives[0]}"
-
-      - name: Create GitHub release
+      - name: Build release
         env:
-          HEAD_SHA: ${{ steps.build.outputs.head_sha }}
-          RUN_URL: ${{ steps.build.outputs.run_url }}
-        run: |
-          shopt -s nullglob
-          archives=(release/*-anykernel3.zip)
-          checksums=(release/*-SHA256SUMS.txt)
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./build.sh "$RUNNER_TEMP/aosp"
 
-          gh release create "$RELEASE_TAG" \
-            "${archives[0]}" "${checksums[0]}" \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$HEAD_SHA" \
-            --title "$RELEASE_TAG" \
-            --notes "Built and tested from [GitHub Actions run $RUN_ID]($RUN_URL)."
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            releases/* \
+            --verify-tag \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes
