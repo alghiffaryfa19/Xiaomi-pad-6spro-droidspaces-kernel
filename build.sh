@@ -3,23 +3,33 @@ set -Eeuo pipefail
 
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 BUILD_DIR="$ROOT/build"
-CACHE_DIR=${CACHE_DIR:-"$ROOT/.cache"}
 RELEASE_DIR=${RELEASE_DIR:-"$ROOT/releases"}
 
 # shellcheck source=build/config.env
 source "$BUILD_DIR/config.env"
 
+RESUKISU_COMMIT=
+RESUKISU_RELEASE_TAG=
+RESUKISU_RELEASE_URL=
+SUSFS_COMMIT=
+SUSFS_VERSION=
+
 # Required and recommended GKI settings from the Droidspaces kernel guide,
-# plus the pinned KernelSU and Xiaomi vendor-module compatibility settings.
+# plus ReSukiSU, SuSFS and Xiaomi vendor-module compatibility settings.
 readonly -a ENABLED_CONFIGS=(
   SYSVIPC POSIX_MQUEUE IPC_NS PID_NS DEVTMPFS NETFILTER_XT_MATCH_ADDRTYPE
   USER_NS IP_NF_TARGET_REJECT NETFILTER_XT_TARGET_LOG NETFILTER_XT_MATCH_RECENT
   IP_SET IP_SET_HASH_IP IP_SET_HASH_NET NETFILTER_XT_SET
   TMPFS_POSIX_ACL TMPFS_XATTR
-  KSU MODULE_ALLOW_BTF_MISMATCH
+  KSU KSU_SUSFS
+  KSU_SUSFS_SUS_PATH KSU_SUSFS_SUS_MOUNT KSU_SUSFS_SUS_KSTAT
+  KSU_SUSFS_SPOOF_UNAME KSU_SUSFS_ENABLE_LOG KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
+  KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG KSU_SUSFS_OPEN_REDIRECT KSU_SUSFS_SUS_MAP
+  MODULE_ALLOW_BTF_MISMATCH
 )
 readonly -a DISABLED_CONFIGS=(
-  KSU_DEBUG KSU_DISABLE_MANAGER KSU_DISABLE_POLICY
+  KSU_DEBUG KSU_TOOLKIT_SUPPORT KSU_DISABLE_MANAGER KSU_DISABLE_POLICY
+  KSU_MULTI_MANAGER_SUPPORT KSU_TRACEPOINT_HOOK KSU_MANUAL_HOOK
 )
 
 log() { printf '[6sp] %s\n' "$*"; }
@@ -27,20 +37,6 @@ die() { printf '[6sp] ERROR: %s\n' "$*" >&2; exit 1; }
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || die "missing host tool: $1"
-}
-
-git_head() {
-  git -C "$1" rev-parse HEAD
-}
-
-require_commit() {
-  [[ -d "$1/.git" ]] || die "not a Git checkout: $1"
-  [[ $(git_head "$1") == "$2" ]] || die "unexpected source revision: $1"
-}
-
-require_clean() {
-  [[ -z "$(git -C "$1" status --porcelain)" ]] ||
-    die "dependency checkout is not clean: $1"
 }
 
 require_line() {
@@ -56,9 +52,6 @@ verify_config() {
   for symbol in "${DISABLED_CONFIGS[@]}"; do
     require_line "$config" "# CONFIG_$symbol is not set"
   done
-  if grep -Eq '^CONFIG_(KSU_SUSFS|SUSFS|NT_SYNC|NTSYNC)=y$' "$config"; then
-    die "an unsupported KernelSU extension is enabled"
-  fi
 
   if [[ "$final" == true ]]; then
     require_line "$config" 'CONFIG_MODVERSIONS=y'
@@ -77,9 +70,28 @@ check_host() {
     die "kernel builds require Linux x86_64"
 
   local command
-  for command in git repo rsync zip unzip make perl file bc bison flex openssl realpath sha256sum; do
+  for command in git repo rsync zip unzip make curl jq patch perl file bc bison flex openssl realpath sha256sum; do
     require_command "$command"
   done
+}
+
+resolve_resukisu_release() {
+  local response
+  local -a curl_args=(
+    -fsSL --retry 3
+    -H 'Accept: application/vnd.github+json'
+    -H 'X-GitHub-Api-Version: 2022-11-28'
+  )
+
+  if [[ -n ${GITHUB_TOKEN:-} ]]; then
+    curl_args+=(-H "Authorization: Bearer $GITHUB_TOKEN")
+  fi
+  response=$(curl "${curl_args[@]}" "$RESUKISU_RELEASES_API?per_page=1") ||
+    die "failed to query ReSukiSU releases"
+  RESUKISU_RELEASE_TAG=$(jq -er 'first.tag_name' <<< "$response") ||
+    die "ReSukiSU release tag is missing"
+  RESUKISU_RELEASE_URL=$(jq -er 'first.html_url' <<< "$response") ||
+    die "ReSukiSU release URL is missing"
 }
 
 sync_sources() {
@@ -102,74 +114,92 @@ sync_sources() {
     die "AOSP source sync is incomplete"
 }
 
-fetch_dependency() {
-  local name=$1 repository=$2 commit=$3 full_history=$4
-  local checkout="$CACHE_DIR/$1" temporary
+fetch_dependencies() {
+  local workspace=$1 resukisu="$1/ReSukiSU"
+  local susfs="$TEMP_DIR/SuSFS" anykernel="$TEMP_DIR/AnyKernel3"
 
-  if [[ -e "$checkout" ]]; then
-    require_commit "$checkout" "$commit"
-    require_clean "$checkout"
-    if [[ "$full_history" == true ]]; then
-      if [[ $(git -C "$checkout" rev-parse --is-shallow-repository) == true ]]; then
-        git -C "$checkout" fetch --unshallow --filter=blob:none --tags origin
-      fi
-    fi
-    return
-  fi
+  git clone --filter=blob:none --branch "$RESUKISU_RELEASE_TAG" \
+    "$RESUKISU_REPOSITORY" "$resukisu"
+  RESUKISU_COMMIT=$(git -C "$resukisu" rev-parse HEAD)
 
-  mkdir -p -- "$CACHE_DIR"
-  temporary="$TEMP_DIR/$name"
-  if [[ "$full_history" == true ]]; then
-    git clone --filter=blob:none --no-checkout "$repository" "$temporary"
-    git -C "$temporary" checkout --detach "$commit"
-  else
-    git init -q "$temporary"
-    git -C "$temporary" remote add origin "$repository"
-    git -C "$temporary" fetch --depth=1 --no-tags origin "$commit"
-    git -C "$temporary" checkout --detach FETCH_HEAD
-  fi
-  require_commit "$temporary" "$commit"
-  mv -- "$temporary" "$checkout"
+  git clone --depth=1 --single-branch --branch "$SUSFS_BRANCH" \
+    "$SUSFS_REPOSITORY" "$susfs"
+  SUSFS_COMMIT=$(git -C "$susfs" rev-parse HEAD)
+
+  git init -q "$anykernel"
+  git -C "$anykernel" fetch --depth=1 --no-tags "$AK3_REPOSITORY" "$AK3_COMMIT"
+  git -C "$anykernel" checkout --detach FETCH_HEAD
+  [[ $(git -C "$anykernel" rev-parse HEAD) == "$AK3_COMMIT" ]] ||
+    die "unexpected AnyKernel3 revision"
+
+  log "ReSukiSU: $RESUKISU_RELEASE_TAG ($RESUKISU_COMMIT)"
+  log "SuSFS: $SUSFS_COMMIT"
 }
 
-integrate_kernelsu() {
-  local common="$1/common" source="$CACHE_DIR/KernelSU"
-  local checkout="$1/KernelSU" link="$1/common/drivers/kernelsu" marker
+integrate_resukisu() {
+  local common="$1/common" link="$1/common/drivers/kernelsu" marker
 
-  if [[ ! -e "$checkout" ]]; then
-    git clone --no-hardlinks "$source" "$checkout"
-    git -C "$checkout" checkout --detach "$KERNELSU_COMMIT"
-  fi
-  require_commit "$checkout" "$KERNELSU_COMMIT"
-  require_clean "$checkout"
-
-  if [[ -L "$link" ]]; then
-    [[ $(readlink "$link") == ../../KernelSU/kernel ]] ||
-      die "unexpected KernelSU symlink: $link"
-  elif [[ -e "$link" ]]; then
-    die "KernelSU integration path is not a symlink: $link"
-  else
-    ln -s ../../KernelSU/kernel "$link"
-  fi
-
-  grep -Fqx 'obj-$(CONFIG_KSU) += kernelsu/' "$common/drivers/Makefile" ||
-    printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' >> "$common/drivers/Makefile"
-
-  if ! grep -Fqx 'source "drivers/kernelsu/Kconfig"' "$common/drivers/Kconfig"; then
-    marker=$(grep -n '^endmenu$' "$common/drivers/Kconfig" | tail -n 1 | cut -d: -f1)
-    [[ -n "$marker" ]] || die "drivers/Kconfig has no endmenu marker"
-    sed -i "${marker}i source \"drivers/kernelsu/Kconfig\"" "$common/drivers/Kconfig"
-  fi
+  ln -s ../../ReSukiSU/kernel "$link"
+  printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' >> "$common/drivers/Makefile"
+  marker=$(grep -n '^endmenu$' "$common/drivers/Kconfig" | tail -n 1 | cut -d: -f1)
+  [[ -n "$marker" ]] || die "drivers/Kconfig has no endmenu marker"
+  sed -i "${marker}i source \"drivers/kernelsu/Kconfig\"" "$common/drivers/Kconfig"
 }
 
-apply_patch() {
-  local common=$1 patch="$BUILD_DIR/kabi.patch"
+adapt_susfs_patch() {
+  perl -0pi -e '
+    $from = "+\t\tif (SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))\n+\t\t\treturn 0;";
+    $to = "+\t\tif (SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))\n+\t\t\tgoto show_pad;";
+    $count = s/\Q$from\E/$to/g;
+    die "SuSFS show_smap patch changed upstream\n" unless $count == 1;
+  ' "$1"
+}
 
-  if git -C "$common" apply --reverse --check "$patch" >/dev/null 2>&1; then
-    return
+integrate_susfs() {
+  local common="$1/common" source="$TEMP_DIR/SuSFS"
+  local upstream_patch adapted_patch patch_output fuzz_file
+
+  grep -Fq 'show_pad:' "$common/fs/proc/task_mmu.c" ||
+    die "kernel does not contain the expected show_pad flow"
+
+  upstream_patch="$source/kernel_patches/50_add_susfs_in_gki-android13-5.15.patch"
+  adapted_patch="$TEMP_DIR/susfs.patch"
+  [[ -f "$upstream_patch" ]] || die "SuSFS Android 13/5.15 patch is missing"
+  cp -- "$upstream_patch" "$adapted_patch"
+  adapt_susfs_patch "$adapted_patch"
+
+  cp -- "$source/kernel_patches/fs/"* "$common/fs/"
+  cp -- "$source/kernel_patches/include/linux/"* "$common/include/linux/"
+
+  if ! patch_output=$(patch --verbose -d "$common" -p1 -F1 \
+    --no-backup-if-mismatch < "$adapted_patch" 2>&1); then
+    printf '%s\n' "$patch_output" >&2
+    die "failed to apply the SuSFS kernel patch"
   fi
-  git -C "$common" apply --check "$patch"
-  git -C "$common" apply "$patch"
+
+  fuzz_file=$(awk '
+    /^[Pp]atching file / {
+      file = $3
+      gsub(/[\047\"]/, "", file)
+    }
+    /with fuzz/ { print file }
+  ' <<< "$patch_output")
+  if [[ $fuzz_file == fs/proc/task_mmu.c ]]; then
+    log "applied SuSFS patch with fuzz 1 in fs/proc/task_mmu.c"
+  elif [[ -z $fuzz_file ]]; then
+    log "applied SuSFS patch without fuzz"
+  else
+    die "unexpected SuSFS fuzz target: $fuzz_file"
+  fi
+
+  grep -A4 -F 'SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file))' \
+    "$common/fs/proc/task_mmu.c" | grep -Fq 'goto show_pad;' ||
+    die "SuSFS show_pad adaptation is missing from the kernel"
+
+  SUSFS_VERSION=$(sed -n 's/^#define SUSFS_VERSION "\([^"]*\)"/\1/p' \
+    "$common/include/linux/susfs.h" | head -n 1)
+  [[ $SUSFS_VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+    die "invalid SuSFS version: $SUSFS_VERSION"
 }
 
 prepare_sources() {
@@ -177,8 +207,10 @@ prepare_sources() {
   local clang_bin build_tools pahole config_out symbol
 
   printf '%s\n' "$SCMVERSION" > "$common/.scmversion"
-  apply_patch "$common"
-  integrate_kernelsu "$workspace"
+  git -C "$common" apply --check "$BUILD_DIR/kabi.patch"
+  git -C "$common" apply "$BUILD_DIR/kabi.patch"
+  integrate_resukisu "$workspace"
+  integrate_susfs "$workspace"
 
   defconfig="$common/arch/arm64/configs/gki_defconfig"
   tool="$common/scripts/config"
@@ -237,14 +269,12 @@ build_kernel() {
 
 package_kernel() {
   local workspace=$1 image="$1/out-6sp/dist-custom/Image"
-  local anykernel="$CACHE_DIR/AnyKernel3" kernelsu="$CACHE_DIR/KernelSU"
-  local staging archive checksum temporary digest kernelsu_tag lto_label
+  local anykernel="$TEMP_DIR/AnyKernel3"
+  local staging archive checksum temporary digest artifact_name lto_label
+  local resukisu_short=${RESUKISU_COMMIT:0:12} susfs_short=${SUSFS_COMMIT:0:12}
 
-  [[ -f "$image" ]] || die "kernel Image is missing"
-
-  kernelsu_tag=$(git -C "$kernelsu" describe --tags --exact-match "$KERNELSU_COMMIT")
-  [[ "$kernelsu_tag" == v[0-9]* ]] || die "KernelSU commit has no release tag"
   lto_label=${LTO_MODE^}
+  artifact_name="$TARGET-$resukisu_short-susfs-$susfs_short"
 
   staging="$TEMP_DIR/package"
   mkdir -p -- "$staging/META-INF/com/google/android" "$staging/tools" "$RELEASE_DIR"
@@ -254,14 +284,16 @@ package_kernel() {
     "$staging/META-INF/com/google/android/"
   cp -- "$anykernel/tools/ak3-core.sh" "$anykernel/tools/busybox" \
     "$anykernel/tools/magiskboot" "$staging/tools/"
-  sed -e "s/@KERNELSU_TAG@/$kernelsu_tag/" -e "s/@LTO_LABEL@/$lto_label/" \
+  sed -e "s/@RESUKISU_VERSION@/$RESUKISU_RELEASE_TAG-$resukisu_short/" \
+    -e "s/@SUSFS_VERSION@/$SUSFS_VERSION-$susfs_short/" \
+    -e "s/@LTO_LABEL@/$lto_label/" \
     "$BUILD_DIR/anykernel.sh" > "$staging/anykernel.sh"
   cp -- "$image" "$staging/Image"
-  printf '%s\n' "$TARGET" > "$staging/version"
+  printf '%s\n' "$artifact_name" > "$staging/version"
 
-  archive="$RELEASE_DIR/$TARGET-anykernel3.zip"
-  checksum="$RELEASE_DIR/$TARGET-SHA256SUMS.txt"
-  temporary="$TEMP_DIR/$TARGET-anykernel3.zip"
+  archive="$RELEASE_DIR/$artifact_name-anykernel3.zip"
+  checksum="$RELEASE_DIR/$artifact_name-SHA256SUMS.txt"
+  temporary="$TEMP_DIR/$artifact_name-anykernel3.zip"
   (cd "$staging" && zip -q -9 -r "$temporary" .)
   unzip -tq "$temporary" >/dev/null
   mv -f -- "$temporary" "$archive"
@@ -272,23 +304,37 @@ package_kernel() {
   log "SHA-256: $digest"
 }
 
+write_action_summary() {
+  [[ -n ${GITHUB_STEP_SUMMARY:-} ]] || return
+
+  printf '%s\n' \
+    '## Kernel build inputs' \
+    '' \
+    "- ReSukiSU: \`$RESUKISU_RELEASE_TAG\` (\`$RESUKISU_COMMIT\`)" \
+    "- SuSFS: \`$SUSFS_VERSION\` (\`$SUSFS_COMMIT\`)" \
+    "- ReSukiSU Manager: [upstream release]($RESUKISU_RELEASE_URL)" \
+    >> "$GITHUB_STEP_SUMMARY"
+}
+
 main() {
   (($# == 1)) || die "usage: $0 /path/to/aosp-workspace"
   check_host
 
   local workspace
   workspace=$(realpath -m -- "$1")
+  log "resolving the current ReSukiSU release"
+  resolve_resukisu_release
   log "syncing pinned AOSP source"
   sync_sources "$workspace"
-  log "fetching pinned dependencies"
-  fetch_dependency KernelSU "$KERNELSU_REPOSITORY" "$KERNELSU_COMMIT" true
-  fetch_dependency AnyKernel3 "$AK3_REPOSITORY" "$AK3_COMMIT" false
-  log "applying Droidspaces and KernelSU configuration"
+  log "fetching dependencies"
+  fetch_dependencies "$workspace"
+  log "applying Droidspaces, ReSukiSU and SuSFS configuration"
   prepare_sources "$workspace"
   log "building $TARGET with ${LTO_MODE^} LTO"
   build_kernel "$workspace"
   log "packaging AnyKernel3 artifact"
   package_kernel "$workspace"
+  write_action_summary
 }
 
 TEMP_DIR=$(mktemp -d -t 6sp-build.XXXXXXXX)

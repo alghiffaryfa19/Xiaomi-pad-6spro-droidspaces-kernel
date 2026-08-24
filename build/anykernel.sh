@@ -1,7 +1,7 @@
 ### AnyKernel3 Ramdisk Mod Script
 
 properties() { '
-kernel.string=6sp Droidspaces Kernel (@LTO_LABEL@ LTO + KernelSU @KERNELSU_TAG@)
+kernel.string=6sp Droidspaces Kernel (@LTO_LABEL@ LTO + ReSukiSU @RESUKISU_VERSION@ + SuSFS @SUSFS_VERSION@)
 do.devicecheck=1
 do.modules=0
 do.systemless=1
