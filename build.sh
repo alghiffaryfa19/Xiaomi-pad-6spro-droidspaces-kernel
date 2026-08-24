@@ -304,18 +304,6 @@ package_kernel() {
   log "SHA-256: $digest"
 }
 
-write_action_summary() {
-  [[ -n ${GITHUB_STEP_SUMMARY:-} ]] || return
-
-  printf '%s\n' \
-    '## Kernel build inputs' \
-    '' \
-    "- ReSukiSU: \`$RESUKISU_RELEASE_TAG\` (\`$RESUKISU_COMMIT\`)" \
-    "- SuSFS: \`$SUSFS_VERSION\` (\`$SUSFS_COMMIT\`)" \
-    "- ReSukiSU Manager: [upstream release]($RESUKISU_RELEASE_URL)" \
-    >> "$GITHUB_STEP_SUMMARY"
-}
-
 main() {
   (($# == 1)) || die "usage: $0 /path/to/aosp-workspace"
   check_host
@@ -334,7 +322,10 @@ main() {
   build_kernel "$workspace"
   log "packaging AnyKernel3 artifact"
   package_kernel "$workspace"
-  write_action_summary
+  if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
+    printf '[ReSukiSU Manager %s](%s)\n' \
+      "$RESUKISU_RELEASE_TAG" "$RESUKISU_RELEASE_URL" >> "$GITHUB_STEP_SUMMARY"
+  fi
 }
 
 TEMP_DIR=$(mktemp -d -t 6sp-build.XXXXXXXX)
