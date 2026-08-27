@@ -11,20 +11,15 @@ source "$BUILD_DIR/config.env"
 RESUKISU_COMMIT=
 RESUKISU_RELEASE_TAG=
 RESUKISU_RELEASE_URL=
-SUSFS_COMMIT=
-SUSFS_VERSION=
 
 # Required and recommended GKI settings from the Droidspaces kernel guide,
-# plus ReSukiSU, SuSFS and Xiaomi vendor-module compatibility settings.
+# plus ReSukiSU and Xiaomi vendor-module compatibility settings.
 readonly -a ENABLED_CONFIGS=(
   SYSVIPC POSIX_MQUEUE IPC_NS PID_NS DEVTMPFS NETFILTER_XT_MATCH_ADDRTYPE
   USER_NS IP_NF_TARGET_REJECT NETFILTER_XT_TARGET_LOG NETFILTER_XT_MATCH_RECENT
   IP_SET IP_SET_HASH_IP IP_SET_HASH_NET NETFILTER_XT_SET
   TMPFS_POSIX_ACL TMPFS_XATTR
-  KSU KSU_SUSFS
-  KSU_SUSFS_SUS_PATH KSU_SUSFS_SUS_MOUNT KSU_SUSFS_SUS_KSTAT
-  KSU_SUSFS_SPOOF_UNAME KSU_SUSFS_ENABLE_LOG KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
-  KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG KSU_SUSFS_OPEN_REDIRECT KSU_SUSFS_SUS_MAP
+  KSU
   MODULE_ALLOW_BTF_MISMATCH
 )
 readonly -a DISABLED_CONFIGS=(
@@ -116,15 +111,11 @@ sync_sources() {
 
 fetch_dependencies() {
   local workspace=$1 resukisu="$1/ReSukiSU"
-  local susfs="$TEMP_DIR/SuSFS" anykernel="$TEMP_DIR/AnyKernel3"
+  local anykernel="$TEMP_DIR/AnyKernel3"
 
   git clone --filter=blob:none --branch "$RESUKISU_RELEASE_TAG" \
     "$RESUKISU_REPOSITORY" "$resukisu"
   RESUKISU_COMMIT=$(git -C "$resukisu" rev-parse HEAD)
-
-  git clone --depth=1 --single-branch --branch "$SUSFS_BRANCH" \
-    "$SUSFS_REPOSITORY" "$susfs"
-  SUSFS_COMMIT=$(git -C "$susfs" rev-parse HEAD)
 
   git init -q "$anykernel"
   git -C "$anykernel" fetch --depth=1 --no-tags "$AK3_REPOSITORY" "$AK3_COMMIT"
@@ -133,7 +124,6 @@ fetch_dependencies() {
     die "unexpected AnyKernel3 revision"
 
   log "ReSukiSU: $RESUKISU_RELEASE_TAG ($RESUKISU_COMMIT)"
-  log "SuSFS: $SUSFS_COMMIT"
 }
 
 integrate_resukisu() {
@@ -146,61 +136,7 @@ integrate_resukisu() {
   sed -i "${marker}i source \"drivers/kernelsu/Kconfig\"" "$common/drivers/Kconfig"
 }
 
-adapt_susfs_patch() {
-  perl -0pi -e '
-    $from = "+\t\tif (SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))\n+\t\t\treturn 0;";
-    $to = "+\t\tif (SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))\n+\t\t\tgoto show_pad;";
-    $count = s/\Q$from\E/$to/g;
-    die "SuSFS show_smap patch changed upstream\n" unless $count == 1;
-  ' "$1"
-}
 
-integrate_susfs() {
-  local common="$1/common" source="$TEMP_DIR/SuSFS"
-  local upstream_patch adapted_patch patch_output fuzz_file
-
-  grep -Fq 'show_pad:' "$common/fs/proc/task_mmu.c" ||
-    die "kernel does not contain the expected show_pad flow"
-
-  upstream_patch="$source/kernel_patches/50_add_susfs_in_gki-android13-5.15.patch"
-  adapted_patch="$TEMP_DIR/susfs.patch"
-  [[ -f "$upstream_patch" ]] || die "SuSFS Android 13/5.15 patch is missing"
-  cp -- "$upstream_patch" "$adapted_patch"
-  adapt_susfs_patch "$adapted_patch"
-
-  cp -- "$source/kernel_patches/fs/"* "$common/fs/"
-  cp -- "$source/kernel_patches/include/linux/"* "$common/include/linux/"
-
-  if ! patch_output=$(patch --verbose -d "$common" -p1 -F1 \
-    --no-backup-if-mismatch < "$adapted_patch" 2>&1); then
-    printf '%s\n' "$patch_output" >&2
-    die "failed to apply the SuSFS kernel patch"
-  fi
-
-  fuzz_file=$(awk '
-    /^[Pp]atching file / {
-      file = $3
-      gsub(/[\047\"]/, "", file)
-    }
-    /with fuzz/ { print file }
-  ' <<< "$patch_output")
-  if [[ $fuzz_file == fs/proc/task_mmu.c ]]; then
-    log "applied SuSFS patch with fuzz 1 in fs/proc/task_mmu.c"
-  elif [[ -z $fuzz_file ]]; then
-    log "applied SuSFS patch without fuzz"
-  else
-    die "unexpected SuSFS fuzz target: $fuzz_file"
-  fi
-
-  grep -A4 -F 'SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file))' \
-    "$common/fs/proc/task_mmu.c" | grep -Fq 'goto show_pad;' ||
-    die "SuSFS show_pad adaptation is missing from the kernel"
-
-  SUSFS_VERSION=$(sed -n 's/^#define SUSFS_VERSION "\([^"]*\)"/\1/p' \
-    "$common/include/linux/susfs.h" | head -n 1)
-  [[ $SUSFS_VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
-    die "invalid SuSFS version: $SUSFS_VERSION"
-}
 
 prepare_sources() {
   local workspace=$1 common="$1/common" defconfig tool constants clang_version
@@ -210,7 +146,6 @@ prepare_sources() {
   git -C "$common" apply --check "$BUILD_DIR/kabi.patch"
   git -C "$common" apply "$BUILD_DIR/kabi.patch"
   integrate_resukisu "$workspace"
-  integrate_susfs "$workspace"
 
   defconfig="$common/arch/arm64/configs/gki_defconfig"
   tool="$common/scripts/config"
@@ -271,10 +206,10 @@ package_kernel() {
   local workspace=$1 image="$1/out-6sp/dist-custom/Image"
   local anykernel="$TEMP_DIR/AnyKernel3"
   local staging archive checksum temporary digest artifact_name lto_label
-  local resukisu_short=${RESUKISU_COMMIT:0:12} susfs_short=${SUSFS_COMMIT:0:12}
+  local resukisu_short=${RESUKISU_COMMIT:0:12}
 
   lto_label=${LTO_MODE^}
-  artifact_name="$TARGET-$resukisu_short-susfs-$susfs_short"
+  artifact_name="$TARGET-$resukisu_short"
 
   staging="$TEMP_DIR/package"
   mkdir -p -- "$staging/META-INF/com/google/android" "$staging/tools" "$RELEASE_DIR"
@@ -285,7 +220,6 @@ package_kernel() {
   cp -- "$anykernel/tools/ak3-core.sh" "$anykernel/tools/busybox" \
     "$anykernel/tools/magiskboot" "$staging/tools/"
   sed -e "s/@RESUKISU_VERSION@/$RESUKISU_RELEASE_TAG-$resukisu_short/" \
-    -e "s/@SUSFS_VERSION@/$SUSFS_VERSION-$susfs_short/" \
     -e "s/@LTO_LABEL@/$lto_label/" \
     "$BUILD_DIR/anykernel.sh" > "$staging/anykernel.sh"
   cp -- "$image" "$staging/Image"
@@ -316,7 +250,7 @@ main() {
   sync_sources "$workspace"
   log "fetching dependencies"
   fetch_dependencies "$workspace"
-  log "applying Droidspaces, ReSukiSU and SuSFS configuration"
+  log "applying Droidspaces and ReSukiSU configuration"
   prepare_sources "$workspace"
   log "building $TARGET with ${LTO_MODE^} LTO"
   build_kernel "$workspace"
@@ -328,7 +262,6 @@ main() {
       '' \
       "- Kernel \`$KERNEL_RELEASE\`" \
       "- ReSukiSU \`$RESUKISU_RELEASE_TAG\` (\`${RESUKISU_COMMIT:0:12}\`) · [Manager]($RESUKISU_RELEASE_URL)" \
-      "- SuSFS \`$SUSFS_VERSION\` (\`${SUSFS_COMMIT:0:12}\`)" \
       >> "$GITHUB_STEP_SUMMARY"
   fi
 }

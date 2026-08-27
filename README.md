@@ -1,1 +1,1 @@
-适用于小米平板 6S Pro（`sheng`）Android 16 `OS3.0.304.0.WNXCNXM`，包含 [Droidspaces](https://github.com/ravindu644/Droidspaces-OSS) 所需内核支持与 [ReSukiSU](https://github.com/ReSukiSU/ReSukiSU) + [SuSFS](https://gitlab.com/simonpunk/susfs4ksu)。
+适用于小米平板 6S Pro（`sheng`）Android 16 `OS3.0.304.0.WNXCNXM`，包含 [Droidspaces](https://github.com/ravindu644/Droidspaces-OSS) 所需内核支持与 [ReSukiSU](https://github.com/ReSukiSU/ReSukiSU)。

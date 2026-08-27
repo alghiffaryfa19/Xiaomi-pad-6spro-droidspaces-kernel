@@ -3,7 +3,7 @@ name: Publish release
 on:
   push:
     tags:
-      - "6sp-ds-resukisu-susfs-OS3.0.304.0-r*"
+      - "6sp-ds-resukisu-OS3.0.304.0-r*"
 
 permissions:
   contents: write
