@@ -9,7 +9,7 @@ do.cleanup=1
 do.cleanuponabort=0
 device.name1=sheng
 supported.versions=16
-supported.patchlevels=2026-06 - 2026-06
+supported.patchlevels=2026-07 - 2026-07
 supported.vendorpatchlevels=2026-02 - 2026-02
 '; }
 
