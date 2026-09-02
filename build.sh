@@ -21,6 +21,7 @@ readonly -a ENABLED_CONFIGS=(
   TMPFS_POSIX_ACL TMPFS_XATTR
   KSU
   MODULE_ALLOW_BTF_MISMATCH
+  DRM_LINDROID_EVDI
 )
 readonly -a DISABLED_CONFIGS=(
   KSU_DEBUG KSU_TOOLKIT_SUPPORT KSU_DISABLE_MANAGER KSU_DISABLE_POLICY
@@ -136,6 +137,16 @@ integrate_resukisu() {
   sed -i "${marker}i source \"drivers/kernelsu/Kconfig\"" "$common/drivers/Kconfig"
 }
 
+integrate_lindroid() {
+  local common="$1/common" marker
+
+  git clone https://github.com/Linux-on-droid/lindroid-drm-loopback "$common/drivers/lindroid-drm"
+  printf '\nobj-y += lindroid-drm/\n' >> "$common/drivers/Makefile"
+  marker=$(grep -n '^endmenu$' "$common/drivers/Kconfig" | tail -n 1 | cut -d: -f1)
+  [[ -n "$marker" ]] || die "drivers/Kconfig has no endmenu marker"
+  sed -i "${marker}i source \"drivers/lindroid-drm/Kconfig\"" "$common/drivers/Kconfig"
+}
+
 
 
 prepare_sources() {
@@ -146,6 +157,7 @@ prepare_sources() {
   git -C "$common" apply --check "$BUILD_DIR/kabi.patch"
   git -C "$common" apply "$BUILD_DIR/kabi.patch"
   integrate_resukisu "$workspace"
+  integrate_lindroid "$workspace"
 
   defconfig="$common/arch/arm64/configs/gki_defconfig"
   tool="$common/scripts/config"
